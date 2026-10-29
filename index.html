@@ -3574,6 +3574,23 @@ html:-webkit-full-screen body > #app{
   visibility:hidden !important;
 }
 </style>
+
+<style id="build196-cloud-sync-styles">
+/* BUILD-196: Supabase sign-in and grid-note cloud sync; does not affect planner layout. */
+#cloudSyncBadge{position:fixed;right:10px;bottom:10px;z-index:9998;display:flex;align-items:center;gap:8px;padding:7px 10px;background:#101820;border:1px solid #35d65a;border-radius:8px;color:#e9fff0;font:12px/1.2 Arial,sans-serif;box-shadow:0 2px 10px #0008}
+#cloudSyncBadge button,#cloudSyncDialog button{border:0;border-radius:5px;padding:7px 10px;background:#39df5e;color:#06120a;font-weight:700;cursor:pointer}
+#cloudSyncDialog[hidden]{display:none!important}
+#cloudSyncDialog{position:fixed;inset:0;z-index:10000;background:#000b;display:flex;align-items:center;justify-content:center;padding:16px;font-family:Arial,sans-serif}
+#cloudSyncDialog .cloud-card{width:min(440px,100%);background:#111923;color:#f4f7fa;border:1px solid #39df5e;border-radius:12px;padding:22px;box-shadow:0 12px 44px #000a}
+#cloudSyncDialog h2{margin:0 0 8px;font-size:21px;color:#54ef75}
+#cloudSyncDialog p{font-size:14px;line-height:1.45;color:#d5dce2}
+#cloudSyncDialog label{display:block;font-size:13px;margin:14px 0 5px}
+#cloudSyncDialog input[type=email]{box-sizing:border-box;width:100%;padding:11px;border-radius:6px;border:1px solid #77838f;background:#fff;color:#111;font-size:16px}
+#cloudSyncDialog .cloud-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+#cloudSyncDialog button.secondary{background:#34414e;color:#fff}
+#cloudSyncMessage{min-height:18px;font-size:13px;color:#baf6c6;margin-top:12px;overflow-wrap:anywhere}
+</style>
+
 </head>
 <body>
 <button aria-label="Exit full screen" id="exitProgramBtn" title="Exit full screen">×</button>
@@ -3715,12 +3732,26 @@ html:-webkit-full-screen body > #app{
 <div id="caySplitArea">
 <div class="grid-scroll-frame" id="plannerPane">
 <div aria-label="Show planner" class="columns" id="columns"></div>
-<div aria-label="Application build number" class="planner-build">BUILD-195</div>
+<div aria-label="Application build number" class="planner-build">BUILD-196</div>
 </div>
 </div>
-<div class="foot"> · BUILD-195</div>
+<div class="foot"> · BUILD-196</div>
 </section>
 </div>
+<div id="cloudSyncBadge" aria-live="polite"><span id="cloudSyncStatus">Grid notes: local only</span><button type="button" id="cloudSyncOpen">Sign in to sync</button></div>
+<div id="cloudSyncDialog" hidden role="dialog" aria-modal="true" aria-labelledby="cloudSyncTitle">
+  <div class="cloud-card">
+    <h2 id="cloudSyncTitle">Sync Radio Run Sheet notes</h2>
+    <p>Enter your email and Supabase will send you a secure sign-in link. Once signed in, your grid notes can sync between computers using this same email address.</p>
+    <form id="cloudSyncForm">
+      <label for="cloudSyncEmail">Email address</label>
+      <input id="cloudSyncEmail" type="email" autocomplete="email" required placeholder="you@example.com">
+      <div class="cloud-actions"><button type="submit" id="cloudSyncSend">Email me a sign-in link</button><button type="button" class="secondary" id="cloudSyncClose">Cancel</button></div>
+    </form>
+    <div id="cloudSyncMessage" role="status"></div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function(){
 const $=s=>document.querySelector(s);
@@ -6895,7 +6926,7 @@ document.addEventListener('DOMContentLoaded',function(){
 </script>
 
 <style id="build193-file-drop-style">
-/* BUILD-195: file drop adds uppercase basename and audio duration when browser metadata is available; preserves BUILD-163 dimensions and layout. */
+/* BUILD-196: file drop adds uppercase basename and audio duration when browser metadata is available; preserves BUILD-163 dimensions and layout. */
 #columns textarea[data-k].file-drop-target{
   outline:2px dashed #39ff72!important;
   outline-offset:-3px!important;
@@ -6991,6 +7022,197 @@ document.addEventListener('DOMContentLoaded',function(){
     target.focus();
     target.setSelectionRange(target.value.length,target.value.length);
   });
+})();
+</script>
+
+<script id="build196-supabase-grid-note-sync">
+(function(){
+  'use strict';
+  const SUPABASE_URL = 'https://tymaqxijrrgdsclsqhhw.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_OnWPgPBFbJeXnedyCUv_AA_8TBJCMmy';
+  const statusEl = document.getElementById('cloudSyncStatus');
+  const openBtn = document.getElementById('cloudSyncOpen');
+  const dialog = document.getElementById('cloudSyncDialog');
+  const form = document.getElementById('cloudSyncForm');
+  const emailInput = document.getElementById('cloudSyncEmail');
+  const sendBtn = document.getElementById('cloudSyncSend');
+  const closeBtn = document.getElementById('cloudSyncClose');
+  const messageEl = document.getElementById('cloudSyncMessage');
+  if (!window.supabase || !window.supabase.createClient) {
+    statusEl.textContent = 'Grid notes: cloud library unavailable';
+    openBtn.textContent = 'Sync unavailable';
+    openBtn.disabled = true;
+    return;
+  }
+  const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+  });
+  let activeUser = null;
+  let syncTimerByKey = new Map();
+  let syncBusy = false;
+  let lastSyncAt = 0;
+  const workflowNames = {ww1:'WW1 WEEKDAYS',sat:'WW1 SATURDAY',cay:'93-5 CAY COUNTRY',rad:'RAD RADIO DFW'};
+
+  function say(message){ messageEl.textContent = message || ''; }
+  function showDialog(){ dialog.hidden = false; say(''); setTimeout(()=>emailInput.focus(),20); }
+  function hideDialog(){ dialog.hidden = true; }
+  openBtn.addEventListener('click', async function(){
+    if(activeUser){
+      if(confirm('Sign out of Radio Run Sheet cloud sync on this computer? Your local notes will remain here.')){
+        const {error}=await client.auth.signOut();
+        if(error){ statusEl.textContent='Cloud sync: sign-out failed'; }
+      }
+    } else showDialog();
+  });
+  closeBtn.addEventListener('click', hideDialog);
+  dialog.addEventListener('click',e=>{ if(e.target===dialog) hideDialog(); });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape' && !dialog.hidden) hideDialog(); });
+
+  function parseNoteKey(key){
+    const parts=String(key||'').split('|');
+    if(parts.length!==5 || parts[0]!=='radioNotes') return null;
+    const workflow=parts[1], showDate=parts[2], hour=parts[3], segment=parts[4];
+    if(!workflowNames[workflow] || !/^\d{4}-\d{2}-\d{2}$/.test(showDate)) return null;
+    return {key,workflow,showDate,hour,segment,segmentKey:hour+'|'+segment};
+  }
+  function localKeys(){
+    const keys=[];
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i);
+      const parsed=parseNoteKey(key);
+      if(parsed) keys.push(parsed);
+    }
+    return keys;
+  }
+  function applyToVisible(key,value){
+    const field=document.querySelector('#columns textarea[data-k]');
+    document.querySelectorAll('#columns textarea[data-k]').forEach(t=>{
+      if(t.dataset.k===key && t.value!==value) t.value=value;
+    });
+  }
+  async function uploadNote(parsed,value){
+    if(!activeUser || !parsed) return;
+    const {error}=await client.from('grid_notes').upsert({
+      user_id:activeUser.id,
+      workflow:parsed.workflow,
+      show_date:parsed.showDate,
+      segment_key:parsed.segmentKey,
+      note_text:value || '',
+      updated_at:new Date().toISOString()
+    },{onConflict:'user_id,workflow,show_date,segment_key'});
+    if(error) throw error;
+  }
+  async function initialSync(){
+    if(!activeUser || syncBusy) return;
+    syncBusy=true;
+    statusEl.textContent='Grid notes: syncing…';
+    try{
+      const {data,error}=await client.from('grid_notes')
+        .select('workflow,show_date,segment_key,note_text,updated_at')
+        .order('updated_at',{ascending:false}).limit(5000);
+      if(error) throw error;
+      const remote=new Map();
+      (data||[]).forEach(row=>{
+        const pair=String(row.segment_key||'').split('|');
+        if(pair.length!==2 || !workflowNames[row.workflow]) return;
+        const key=['radioNotes',row.workflow,row.show_date,pair[0],pair[1]].join('|');
+        remote.set(key,row);
+      });
+      const local=localKeys();
+      const localByKey=new Map(local.map(item=>[item.key,item]));
+      // Cloud copy wins where one exists; local-only notes are uploaded to migrate existing work.
+      for(const [key,row] of remote){
+        localStorage.setItem(key,row.note_text||'');
+        applyToVisible(key,row.note_text||'');
+      }
+      for(const item of local){
+        if(!remote.has(item.key)) await uploadNote(item,localStorage.getItem(item.key)||'');
+      }
+      // A note may exist in the cloud for a date not yet rendered; it is already in local storage now.
+      statusEl.textContent='Grid notes: synced';
+      openBtn.textContent='Sign out';
+      lastSyncAt=Date.now();
+    }catch(err){
+      console.error('Grid note cloud sync failed:',err);
+      statusEl.textContent='Grid notes: sync error';
+      say('Sync error: '+(err.message||'Please check the Supabase table and sign-in settings.'));
+    }finally{ syncBusy=false; }
+  }
+  async function syncCurrentWorkflow(){
+    if(!activeUser) return;
+    const workflow=(document.querySelector('#columns textarea[data-k]')?.dataset.k||'').split('|')[1];
+    if(!workflow || !workflowNames[workflow]) return;
+    try{
+      const {data,error}=await client.from('grid_notes').select('workflow,show_date,segment_key,note_text')
+        .eq('workflow',workflow).limit(5000);
+      if(error) throw error;
+      (data||[]).forEach(row=>{
+        const pair=String(row.segment_key||'').split('|');
+        if(pair.length!==2) return;
+        const key=['radioNotes',row.workflow,row.show_date,pair[0],pair[1]].join('|');
+        localStorage.setItem(key,row.note_text||'');
+        applyToVisible(key,row.note_text||'');
+      });
+      statusEl.textContent='Grid notes: synced';
+    }catch(err){ console.error('Could not refresh workflow notes:',err); statusEl.textContent='Grid notes: sync error'; }
+  }
+  document.addEventListener('input',function(event){
+    const field=event.target;
+    if(!field || !field.matches || !field.matches('#columns textarea[data-k]')) return;
+    const parsed=parseNoteKey(field.dataset.k);
+    if(!parsed || !activeUser) return;
+    if(syncTimerByKey.has(parsed.key)) clearTimeout(syncTimerByKey.get(parsed.key));
+    statusEl.textContent='Grid notes: saving…';
+    syncTimerByKey.set(parsed.key,setTimeout(async function(){
+      syncTimerByKey.delete(parsed.key);
+      try{ await uploadNote(parsed,field.value); statusEl.textContent='Grid notes: synced'; lastSyncAt=Date.now(); }
+      catch(err){ console.error('Grid note save failed:',err); statusEl.textContent='Grid notes: save error'; }
+    },650));
+  });
+  form.addEventListener('submit',async function(event){
+    event.preventDefault();
+    const email=emailInput.value.trim();
+    if(!email) return;
+    sendBtn.disabled=true;
+    say('Sending your sign-in link…');
+    try{
+      const redirectTo=window.location.origin==='null' ? undefined : window.location.origin+window.location.pathname;
+      const options={};
+      if(redirectTo) options.emailRedirectTo=redirectTo;
+      const {error}=await client.auth.signInWithOtp({email,options});
+      if(error) throw error;
+      say('Check your email and click the Supabase sign-in link. Return to this page after it opens.');
+    }catch(err){ say('Could not send link: '+(err.message||'Please try again.')); }
+    finally{ sendBtn.disabled=false; }
+  });
+  client.auth.onAuthStateChange(function(event,session){
+    activeUser=session && session.user ? session.user : null;
+    if(activeUser){
+      hideDialog();
+      openBtn.textContent='Sign out';
+      statusEl.textContent='Grid notes: signing in…';
+      // Avoid awaiting Supabase calls inside its auth callback.
+      setTimeout(()=>initialSync().then(syncCurrentWorkflow),0);
+    }else{
+      openBtn.textContent='Sign in to sync';
+      statusEl.textContent='Grid notes: local only';
+    }
+  });
+  client.auth.getSession().then(({data,error})=>{
+    if(error) console.error('Supabase session check failed:',error);
+    activeUser=data && data.session && data.session.user ? data.session.user : null;
+    if(activeUser){ openBtn.textContent='Sign out'; initialSync().then(syncCurrentWorkflow); }
+  });
+  // Refresh remote notes when the user changes the selected workflow/show or rerenders the grid.
+  const columns=document.getElementById('columns');
+  if(columns && window.MutationObserver){
+    let observerTimer;
+    new MutationObserver(()=>{
+      if(!activeUser) return;
+      clearTimeout(observerTimer);
+      observerTimer=setTimeout(()=>syncCurrentWorkflow(),300);
+    }).observe(columns,{childList:true});
+  }
 })();
 </script>
 

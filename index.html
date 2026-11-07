@@ -3576,7 +3576,7 @@ html:-webkit-full-screen body > #app{
 </style>
 
 <style id="build197-cloud-sync-styles">
-/* BUILD-198: Supabase sign-in and grid-note cloud sync; does not affect planner layout. */
+/* BUILD-199: Supabase sign-in and grid-note cloud sync; does not affect planner layout. */
 #cloudSyncBadge{position:fixed;right:10px;bottom:10px;z-index:9998;display:flex;align-items:center;gap:8px;padding:7px 10px;background:#101820;border:1px solid #35d65a;border-radius:8px;color:#e9fff0;font:12px/1.2 Arial,sans-serif;box-shadow:0 2px 10px #0008}
 #cloudSyncBadge button,#cloudSyncDialog button{border:0;border-radius:5px;padding:7px 10px;background:#39df5e;color:#06120a;font-weight:700;cursor:pointer}
 #cloudSyncDialog[hidden]{display:none!important}
@@ -3732,10 +3732,10 @@ html:-webkit-full-screen body > #app{
 <div id="caySplitArea">
 <div class="grid-scroll-frame" id="plannerPane">
 <div aria-label="Show planner" class="columns" id="columns"></div>
-<div aria-label="Application build number" class="planner-build">BUILD-198</div>
+<div aria-label="Application build number" class="planner-build">BUILD-199</div>
 </div>
 </div>
-<div class="foot"> · BUILD-198</div>
+<div class="foot"> · BUILD-199</div>
 </section>
 </div>
 <div id="cloudSyncBadge" aria-live="polite"><span id="cloudSyncStatus">Grid notes: local only</span><button type="button" id="cloudSyncOpen">Sign in to sync</button></div>
@@ -6668,17 +6668,16 @@ try{
   }
 })();
 
-/* BUILD-198: one consistent width-based scale for every browser and screen. */
+/* BUILD-199: match the compact on-screen footprint while scaling uniformly. */
 (function(){
-  const DESIGN_W=1600, DESIGN_H=900;
+  const DESIGN_W=1600, DESIGN_H=900, TARGET_SCALE=0.56;
   let raf=0;
   function fitApp(){
     const app=document.querySelector('.app');
     if(!app) return;
     const viewportWidth=Math.max(1,
       document.documentElement.clientWidth || window.innerWidth || DESIGN_W);
-    /* Scale uniformly to fit the available width; page height may scroll naturally. */
-    const scale=Math.min(1,viewportWidth/DESIGN_W);
+    const scale=Math.min(TARGET_SCALE,viewportWidth/DESIGN_W);
     document.documentElement.style.setProperty('--ui-scale',scale.toFixed(4));
     app.style.setProperty('width',DESIGN_W+'px','important');
     app.style.setProperty('min-width',DESIGN_W+'px','important');
@@ -6695,9 +6694,7 @@ try{
   }
   if(document.readyState==='loading'){
     document.addEventListener('DOMContentLoaded',fitApp,{once:true});
-  } else {
-    fitApp();
-  }
+  }else fitApp();
   window.addEventListener('resize',scheduleFit);
   window.addEventListener('orientationchange',scheduleFit);
   window.addEventListener('pageshow',scheduleFit);
@@ -6854,7 +6851,7 @@ document.addEventListener('DOMContentLoaded',function(){
 </script>
 
 <style id="build193-file-drop-style">
-/* BUILD-198: file drop adds uppercase basename and audio duration when browser metadata is available; preserves BUILD-163 dimensions and layout. */
+/* BUILD-199: file drop adds uppercase basename and audio duration when browser metadata is available; preserves BUILD-163 dimensions and layout. */
 #columns textarea[data-k].file-drop-target{
   outline:2px dashed #39ff72!important;
   outline-offset:-3px!important;
